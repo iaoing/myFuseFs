@@ -81,14 +81,14 @@ int Plfs::init( int *argc, char **argv )
 
 int Plfs::f_access(const char *path, int mask)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     
     int ret = 0;
     struct stat st;
     mode_t mode;
-    ret = lstat(strPath, &st);
+    ret = lstat(strPath.c_str(), &st);
     if(ret == 0){
         mode = st.st_mode;
     }else{
@@ -97,9 +97,9 @@ int Plfs::f_access(const char *path, int mask)
 
     mode_t open_mode = 0;
     if(S_ISDIR(mode)){
-        ret = access(strPath, mask);
+        ret = access(strPath.c_str(), mask);
     }else if(S_ISREG(mode)){
-        ret = access(strPath, F_OK);
+        ret = access(strPath.c_str(), F_OK);
         if(ret == 0){
             if(checkMask(mask,W_OK|R_OK)) {
                 open_mode = O_RDWR;
@@ -110,7 +110,7 @@ int Plfs::f_access(const char *path, int mask)
             } else if(checkMask(mask,F_OK)) {
                 return ret;   // we already know this
             }
-            int fd = open(strPath, open_mode，0777)；
+            int fd = open(strPath.c_str(), open_mode, 0777);
             if(fd < 0){
                 return -1;
             }
@@ -118,15 +118,16 @@ int Plfs::f_access(const char *path, int mask)
             return ret;
         }
     }else if(S_ISLNK(mode)){
-        ret = access(strPath, mask);
+        ret = access(strPath.c_str(), mask);
     }
 
+    self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     return ret ;
 }
 
 int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     int fd;
     fd = open(strPath.c_str(), O_CREAT|O_TRUNC|O_WRONLY, mode);
@@ -142,16 +143,16 @@ int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev)
 int Plfs::f_create(const char *path, mode_t /*  mode */, 
                    struct fuse_file_info * /* fi */)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     self->BLog.log("%s, %d => path:%s\n", __FUNCTION__, __LINE__, path);
-    return -1;
+    return -ENOSYS;
 }
 
 // returns 0 or -err
 // nothing to do for a read file
 int Plfs::f_fsync(const char *path, int /* datasync */, struct fuse_file_info *fi)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     // string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator it;
     it = self->open_files.find(path);
@@ -169,7 +170,7 @@ int Plfs::f_fsync(const char *path, int /* datasync */, struct fuse_file_info *f
 int Plfs::f_ftruncate(const char *path, off_t offset,
                       struct fuse_file_info *fi)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator it;
     it = self->open_files.find(path);
@@ -186,7 +187,7 @@ int Plfs::f_ftruncate(const char *path, off_t offset,
 // return 0 or -err
 int Plfs::f_truncate( const char *path, off_t offset )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator it;
     it = self->open_files.find(path);
@@ -202,36 +203,44 @@ int Plfs::f_truncate( const char *path, off_t offset )
 int Plfs::f_fgetattr(const char *path, struct stat *stbuf,
                      struct fuse_file_info *fi)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
+    int ret;
     string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator fd_it;
     fd_it = self->open_files.find(path);
     if ( fd_it == self->open_files.end() ) {
-        self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
-        return lstat(strPath.c_str(), stbuf);;
+        makeNewFile(path, 0777);
+        ret = lstat(strPath.c_str(), stbuf);
+        self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);        
+        return ret;
     }
-    self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
-    return fstat(fd_it->second->fd, stbuf);
-}
+    ret = fstat(fd_it->second->fd, stbuf);
+    self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
+    return ret;
 
+}
 int Plfs::f_getattr(const char *path, struct stat *stbuf)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
+    int ret;
     string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator fd_it;
     fd_it = self->open_files.find(path);
     if ( fd_it == self->open_files.end() ) {
-        self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
-        return lstat(strPath.c_str(), stbuf);;
+        makeNewFile(path, 0777);
+        ret = lstat(strPath.c_str(), stbuf);
+        self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
+        return ret;
     }
-    self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
-    return fstat(fd_it->second->fd, stbuf);
+    ret = fstat(fd_it->second->fd, stbuf);
+    self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
+    return ret;
 }
 
 // needs to work differently for directories
 int Plfs::f_utime (const char *path, struct utimbuf *ut)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     return utime(strPath.c_str(), ut);
@@ -240,14 +249,14 @@ int Plfs::f_utime (const char *path, struct utimbuf *ut)
 // this needs to recurse on all data and index files
 int Plfs::f_chmod (const char *path, mode_t mode)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     return chmod(strPath.c_str(), mode);
 }
 
 int Plfs::f_chown (const char *path, uid_t uid, gid_t gid )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     return chown(strPath.c_str(), uid, gid);
@@ -255,7 +264,7 @@ int Plfs::f_chown (const char *path, uid_t uid, gid_t gid )
 
 int Plfs::f_mkdir (const char *path, mode_t mode )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandDirPath(path);
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     return mkdir(strPath.c_str(), mode);
@@ -263,7 +272,7 @@ int Plfs::f_mkdir (const char *path, mode_t mode )
 
 int Plfs::f_rmdir( const char *path )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandDirPath(path);
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     return rmdir(strPath.c_str());
@@ -278,7 +287,7 @@ int Plfs::f_rmdir( const char *path )
 // fine to leave it undefined.  users shouldn't do stupid stuff like this anyway
 int Plfs::f_unlink( const char *path )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     return unlink(strPath.c_str());
@@ -288,7 +297,7 @@ int Plfs::f_unlink( const char *path )
 // returns 0 or -err
 int Plfs::f_opendir( const char *path, struct fuse_file_info *fi )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandDirPath(path);
     OpenDir *fi_dir = new OpenDir;
     fi_dir->last_offset = 0;
@@ -332,7 +341,7 @@ int Plfs::f_opendir( const char *path, struct fuse_file_info *fi )
 int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                     off_t offset, struct fuse_file_info *fi)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandDirPath(path);
     OpenDir *fi_dir = (OpenDir *)fi->fh;
     // struct dirent entry;
@@ -392,7 +401,7 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 int Plfs::f_releasedir( const char *path, struct fuse_file_info *fi )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     if (fi->fh) {
         delete (OpenDir *)fi->fh;
     }
@@ -407,7 +416,7 @@ int Plfs::f_releasedir( const char *path, struct fuse_file_info *fi )
 // O_RDWR is optimized for writes but the reads might be horrible
 int Plfs::f_open(const char *path, struct fuse_file_info *fi)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     fi->fh = (uint64_t)NULL;
     bool newly_created = false;
@@ -450,13 +459,13 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi)
     pthread_mutex_unlock( &self->fd_mutex );
     // we can safely add more writers to an already open file
     // bec FUSE checks f_access before allowing an f_open
-    self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
-    return (fd)?0:-1;
+    self->BLog.log("%s, %d => path:%s, strPath:%s, fd:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), fd);
+    return fd;
 }
 
 int Plfs::f_release( const char *path, struct fuse_file_info *fi )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     // string strPath = expandPath(path);
     struct OpenFile *openfile = (struct OpenFile*)fi->fh; 
     int fd = 0;                                   
@@ -486,7 +495,7 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi )
 int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
                   struct fuse_file_info *fi)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator fd_it;
     fd_it = self->open_files.find(path);
@@ -510,7 +519,7 @@ int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
 
 int Plfs::f_readlink (const char *path, char *buf, size_t bufsize)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     int ret;
     int len;
@@ -527,7 +536,7 @@ int Plfs::f_readlink (const char *path, char *buf, size_t bufsize)
 // not support hard link;
 int Plfs::f_link( const char *path, const char *to )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     self->BLog.log("%s, %d => path:%s, to:%s\n", 
             __FUNCTION__, __LINE__, path, to);    
     return -1;
@@ -535,7 +544,7 @@ int Plfs::f_link( const char *path, const char *to )
 
 int Plfs::f_symlink( const char *path, const char *to )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     int ret = 0;
     string strPath   = expandPath(path);
     string strPathTo = expandPath(to);
@@ -548,12 +557,13 @@ int Plfs::f_symlink( const char *path, const char *to )
 
 int Plfs::f_statfs(const char *path, struct statvfs *stbuf)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     int ret;
     ret = statvfs(strPath.c_str(), stbuf);
+    // ret = statvfs(BMPOINT, stbuf);
 
-    self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
+    self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     return ret;
 }
 
@@ -561,7 +571,7 @@ int Plfs::f_statfs(const char *path, struct statvfs *stbuf)
 int Plfs::f_readn(const char *path, char *buf, size_t size, off_t offset,
                   struct fuse_file_info *fi)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     int ret;
     std::map<string, OpenFile*>::iterator fd_it;
     fd_it = self->open_files.find(path);
@@ -586,7 +596,7 @@ int Plfs::f_readn(const char *path, char *buf, size_t size, off_t offset,
 
 int Plfs::f_flush( const char *path, struct fuse_file_info *fi )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     int ret = 0;
     std::map<string, OpenFile*>::iterator fd_it;
     fd_it = self->open_files.find(path);
@@ -607,7 +617,7 @@ int Plfs::f_flush( const char *path, struct fuse_file_info *fi )
 
 int Plfs::f_rename( const char *path, const char *to )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     int ret = 0;
     string strPath = expandPath(path);
     string strPathTo = expandPath(to);
@@ -641,9 +651,9 @@ int Plfs::f_rename( const char *path, const char *to )
 
 mode_t Plfs::get_mod(const char* path)
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
-    mode_t mode;
+    mode_t mode = 0;
     int ret;
     pthread_mutex_lock( &self->modes_mutex );
     std::map<string, mode_t>::iterator itr = self->known_modes.find( path );
@@ -659,13 +669,13 @@ mode_t Plfs::get_mod(const char* path)
     }
     pthread_mutex_unlock( &self->modes_mutex );
 
-    self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
+    self->BLog.log("%s, %d => path:%s, strPath:%s, mode:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), mode);
     return mode;    
 }
 
 string Plfs::expandPath( const char *path )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
 
     string full_logical = "";
     if(! strncmp(path, "/mnt/bing", sizeof("/mnt/bing"))){
@@ -711,7 +721,7 @@ string Plfs::expandPath( const char *path )
 
 string Plfs::expandDirPath( const char *path )
 {
-    self->BLog.log("Begin %s, line %d\n", __FUNCTION__, __LINE__);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
 
     string full_logical = "";
     if(! strncmp(path, "/mnt/bing", sizeof("/mnt/bing"))){
@@ -759,4 +769,22 @@ string Plfs::expandDirPath( const char *path )
 bool Plfs::checkMask(int mask, int value)
 {
     return (mask& value || mask == value);
+}
+
+int Plfs::makeNewFile(const char *path, mode_t mode)
+{
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
+    if(strncmp(path, "/.Trash", strlen("/.Trash")) == 0){
+        return 0;
+    }
+    string strPath = expandPath(path);
+    int fd;
+    fd = open(strPath.c_str(), O_CREAT|O_TRUNC|O_WRONLY, mode);
+    if (fd < 0) {
+        return -1;
+        self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
+    }
+    close(fd);
+    self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
+    return 0;
 }

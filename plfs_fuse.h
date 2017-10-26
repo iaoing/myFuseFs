@@ -25,7 +25,7 @@ struct OpenFile {
     int     flags;
 };
 
-
+#define BMPOINT "/mnt/bing_store/"
 
 //#include <hash_map>   // shoot, hash_map not found.  more appropriate though..
 #define HASH_MAP map
@@ -79,6 +79,7 @@ class Plfs : public fusexx::fuse<Plfs>
         static string expandPath( const char * );
         static string expandDirPath( const char * );
         static bool checkMask(int mask, int value);
+        static int makeNewFile(const char *path, mode_t mode);
 
         std::map<string, OpenFile*>     open_files;
         // std::map<string, DIR>           dir_map;
