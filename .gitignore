@@ -1,0 +1,11 @@
+#by:bing 2017-10-26
+*~
+*.o
+*.la
+*.a
+*.lo
+*.swp
+*.tar*
+*.zip
+*.exe*
+bing_fuse
