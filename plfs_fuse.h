@@ -1,5 +1,6 @@
 #include "fusexx.h"
 #include "bing_log.h"
+#include "posix_iostore.h"
 
 class T;
 
@@ -24,6 +25,8 @@ struct OpenFile {
     gid_t   gid;
     int     flags;
 };
+
+
 
 #define BMPOINT "/mnt/bing_store/"
 
@@ -80,17 +83,30 @@ class Plfs : public fusexx::fuse<Plfs>
         static string expandDirPath( const char * );
         static bool checkMask(int mask, int value);
         static int makeNewFile(const char *path, mode_t mode);
+        static int get_groups( vector<gid_t> * );
+        static int set_groups( uid_t );
+        static uid_t plfs_getuid();
+        static gid_t plfs_getgid();
+        static int plfs_setfsuid(uid_t u);
+        static int plfs_setfsgid(gid_t g);
+        static double getTime( );
+        static int get_error(int errcode){
+            return -errcode;
+        };
 
         std::map<string, OpenFile*>     open_files;
         // std::map<string, DIR>           dir_map;
         std::map<string, mode_t>        known_modes;  // cache when possible
+        map< uid_t, vector<gid_t> >     memberships;
 
         pthread_mutex_t                 modes_mutex;
         pthread_mutex_t                 fd_mutex;
         pthread_rwlock_t                write_lock;
+        pthread_mutex_t                 group_mutex;
 
 
     ////////// for debug;
     public:
-        bingLog  BLog;
+        bingLog         BLog;
+        PosixIOStore    PIO;
 };
