@@ -117,7 +117,7 @@ int Plfs::f_access(const char *path, int mask)
     int ret = 0;
     struct stat st;
     mode_t mode;
-    ret = lstat(strPath.c_str(), &st);
+    ret = self->PIO.Lstat(strPath.c_str(), &st);
     if(ret == 0){
         mode = st.st_mode;
     }else{
@@ -126,9 +126,9 @@ int Plfs::f_access(const char *path, int mask)
 
     mode_t open_mode = 0;
     if(S_ISDIR(mode)){
-        ret = access(strPath.c_str(), mask);
+        ret = self->PIO.Access(strPath.c_str(), mask);
     }else if(S_ISREG(mode)){
-        ret = access(strPath.c_str(), F_OK);
+        ret = self->PIO.Access(strPath.c_str(), F_OK);
         if(ret == 0){
             if(checkMask(mask,W_OK|R_OK)) {
                 open_mode = O_RDWR;
@@ -140,24 +140,17 @@ int Plfs::f_access(const char *path, int mask)
                 FUSE_PLFS_EXIT;
                 return 0;   // we already know this
             }
-            int fd = open(strPath.c_str(), open_mode, 0777);
-            if(fd < 0){
-                FUSE_PLFS_EXIT;
-                return fd;
-            }
-            close(fd);
+            ret = self->PIO.Open(strPath.c_str(), open_mode, 0777);
         }
         FUSE_PLFS_EXIT;
-        return ret;
+        return -ret;
     }else if(S_ISLNK(mode)){
-        ret = access(strPath.c_str(), mask);
-    }else{
-        ret = ENOSYS;
+        ret = self->PIO.Access(strPath.c_str(), mask);
     }
 
     self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     FUSE_PLFS_EXIT;
-    return ret ;
+    return -ret ;
 }
 
 int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev)
@@ -165,17 +158,17 @@ int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev)
     FUSE_PLFS_ENTER;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
-    int fd;
-    fd = open(strPath.c_str(), O_CREAT|O_TRUNC|O_WRONLY, mode);
-    if (fd < 0) {
-        self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
-        FUSE_PLFS_EXIT;
-        return -1;        
+    int ret;
+    // ret = self->PIO.Open(strPath.c_str(), O_CREAT|O_TRUNC|O_WRONLY, mode | S_IWUSR);
+    ret = self->PIO.Open(strPath.c_str(), O_CREAT|O_TRUNC|O_WRONLY, 00777);
+    if(ret == 0){
+        pthread_mutex_lock( &self->modes_mutex );
+        self->known_modes[path] = mode;
+        pthread_mutex_unlock( &self->modes_mutex );        
     }
-    close(fd);
-    self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
+    self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     FUSE_PLFS_EXIT;
-    return 0;
+    return -ret;
 }
 
 int Plfs::f_create(const char *path, mode_t /*  mode */, 
@@ -193,8 +186,9 @@ int Plfs::f_create(const char *path, mode_t /*  mode */,
 int Plfs::f_fsync(const char *path, int /* datasync */, struct fuse_file_info *fi)
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
-    // string strPath = expandPath(path);
+    string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator it;
     it = self->open_files.find(path);
     if(it == self->open_files.end())
@@ -205,7 +199,8 @@ int Plfs::f_fsync(const char *path, int /* datasync */, struct fuse_file_info *f
     }
     self->BLog.log("%s, %d => path:%s\n", __FUNCTION__, __LINE__, path);
     FUSE_PLFS_EXIT;
-    return fsync(it->second->fd);
+    ret = self->PIO.Fsync(strPath.c_str(), it->second->fd);
+    return 0;
 }
 
 // this means it is an open file.  That means we also need to check our
@@ -214,6 +209,7 @@ int Plfs::f_ftruncate(const char *path, off_t offset,
                       struct fuse_file_info *fi)
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator it;
@@ -222,11 +218,14 @@ int Plfs::f_ftruncate(const char *path, off_t offset,
     {
         self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
         FUSE_PLFS_EXIT;
-        return truncate(strPath.c_str(), offset);
+        ret = self->PIO.Truncate(strPath.c_str(), offset);
+        return -ret;
     }    
-    self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
+    ret = self->PIO.Fsync(strPath.c_str(), it->second->fd);
+    ret = self->PIO.Ftruncate(strPath.c_str(), it->second->fd, offset);
+    self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     FUSE_PLFS_EXIT;
-    return ftruncate(it->second->fd, offset);
+    return -ret;
 }
 
 // use removeDirectoryTree to remove all data but not the dir structure
@@ -234,6 +233,7 @@ int Plfs::f_ftruncate(const char *path, off_t offset,
 int Plfs::f_truncate( const char *path, off_t offset )
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator it;
@@ -242,11 +242,14 @@ int Plfs::f_truncate( const char *path, off_t offset )
     {
         self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
         FUSE_PLFS_EXIT;
-        return truncate(strPath.c_str(), offset);
+        ret = self->PIO.Truncate(strPath.c_str(), offset);
+        return -ret;
     }    
+    ret = self->PIO.Fsync(strPath.c_str(), it->second->fd);
+    ret = self->PIO.Ftruncate(strPath.c_str(), it->second->fd, offset);
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     FUSE_PLFS_EXIT;
-    return ftruncate(it->second->fd, offset);
+    return -ret;
 }
 
 int Plfs::f_fgetattr(const char *path, struct stat *stbuf,
@@ -254,95 +257,105 @@ int Plfs::f_fgetattr(const char *path, struct stat *stbuf,
 {
     FUSE_PLFS_ENTER;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
-    int ret;
+    int ret = 0;
     string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator fd_it;
     fd_it = self->open_files.find(path);
     if ( fd_it == self->open_files.end() ) {
         makeNewFile(path, 0777);
-        ret = lstat(strPath.c_str(), stbuf);
-        self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);        
-        FUSE_PLFS_EXIT;
-        return ret;
+        ret = self->PIO.Lstat(strPath.c_str(), stbuf);
     }else{
-        ret = fstat(fd_it->second->fd, stbuf);
+        ret = self->PIO.Fstat(strPath.c_str(), fd_it->second->fd, stbuf);
     }
     self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     FUSE_PLFS_EXIT;
-    return ret;
+    return -ret;
 
 }
 int Plfs::f_getattr(const char *path, struct stat *stbuf)
 {
     FUSE_PLFS_ENTER;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
-    int ret;
+    int ret = 0;
     string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator fd_it;
     fd_it = self->open_files.find(path);
     if ( fd_it == self->open_files.end() ) {
         makeNewFile(path, 0777);
-        ret = lstat(strPath.c_str(), stbuf);
-        self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
-        FUSE_PLFS_EXIT;
-        return ret;
+        ret = self->PIO.Lstat(strPath.c_str(), stbuf);
     }else{
-        ret = fstat(fd_it->second->fd, stbuf);
+        ret = self->PIO.Fsync(strPath.c_str(), fd_it->second->fd);
+        ret = self->PIO.Fstat(strPath.c_str(), fd_it->second->fd, stbuf);
     }
     self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     FUSE_PLFS_EXIT;
-    return ret;
+    return -ret;
 }
 
 // needs to work differently for directories
 int Plfs::f_utime (const char *path, struct utimbuf *ut)
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
+    ret = self->PIO.Utime(strPath.c_str(), ut);
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     FUSE_PLFS_EXIT;
-    return utime(strPath.c_str(), ut);
+    return -ret;
 }
 
 // this needs to recurse on all data and index files
 int Plfs::f_chmod (const char *path, mode_t mode)
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
+    ret = self->PIO.Chmod(strPath.c_str(), mode);
+    if(ret == 0){
+        pthread_mutex_lock( &self->modes_mutex );
+        self->known_modes[path] = mode;
+        pthread_mutex_unlock( &self->modes_mutex );        
+    }
     FUSE_PLFS_EXIT;
-    return chmod(strPath.c_str(), mode);
+    return -ret;
 }
 
 int Plfs::f_chown (const char *path, uid_t uid, gid_t gid )
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
+    ret = self->PIO.Chown(strPath.c_str(), uid, gid);
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     FUSE_PLFS_EXIT;
-    return chown(strPath.c_str(), uid, gid);
+    return -ret;
 }
 
 int Plfs::f_mkdir (const char *path, mode_t mode )
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandDirPath(path);
+    ret = self->PIO.Mkdir(strPath.c_str(), mode);
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     FUSE_PLFS_EXIT;
-    return mkdir(strPath.c_str(), mode);
+    return -ret;
 }
 
 int Plfs::f_rmdir( const char *path )
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandDirPath(path);
+    ret = self->PIO.Rmdir(strPath.c_str());
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     FUSE_PLFS_EXIT;
-    return rmdir(strPath.c_str());
+    return -ret;
 }
 
 // what if someone is calling unlink on an open file?
@@ -355,11 +368,13 @@ int Plfs::f_rmdir( const char *path )
 int Plfs::f_unlink( const char *path )
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
-    self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
+    ret = self->PIO.Unlink(strPath.c_str());
+    self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     FUSE_PLFS_EXIT;
-    return unlink(strPath.c_str());
+    return -ret;
 }
 
 // see f_readdir for some documentation here
@@ -367,6 +382,7 @@ int Plfs::f_unlink( const char *path )
 int Plfs::f_opendir( const char *path, struct fuse_file_info *fi )
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandDirPath(path);
     OpenDir *fi_dir = new OpenDir;
@@ -378,17 +394,16 @@ int Plfs::f_opendir( const char *path, struct fuse_file_info *fi )
     struct dirent entry;
     struct dirent* entryPtr = NULL;
     set<string>* names = ((set<string>*)&(fi_dir->entries));    
-    int ret = 0;
-
+    
     this_dir = opendir(strPath.c_str());
     if(!this_dir) {
-        ret = -1;
+        ret = errno;
         self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
         FUSE_PLFS_EXIT;
-        return ret;
+        return -ret;
     }
 
-    while ((ret = readdir_r(this_dir, &entry, &entryPtr)) == 0 && entryPtr != NULL) {
+    while ((ret = self->PIO.Readdir_r(strPath.c_str(), this_dir, &entry, &entryPtr)) == 0 && entryPtr != NULL) {
         // if ((!strcmp(entryPtr->d_name,".") ||
         //                   !strcmp(entryPtr->d_name,".."))) {
         //     continue;   // skip the dots
@@ -397,7 +412,7 @@ int Plfs::f_opendir( const char *path, struct fuse_file_info *fi )
         file = entryPtr->d_name;
         names->insert(file);        
     } 
-    closedir(this_dir);
+    ret = self->PIO.Closedir(strPath.c_str(), this_dir);
 
     //////////
     if (ret == 0) {
@@ -407,13 +422,14 @@ int Plfs::f_opendir( const char *path, struct fuse_file_info *fi )
     }
     self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     FUSE_PLFS_EXIT;
-    return ret;
+    return -ret;
 }
 
 int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                     off_t offset, struct fuse_file_info *fi)
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandDirPath(path);
     OpenDir *fi_dir = (OpenDir *)fi->fh;
@@ -431,20 +447,19 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     struct dirent entry;
     struct dirent* entryPtr = NULL;
     set<string>* names = ((set<string>*)&(fi_dir->entries));     
-    int ret = 0;
     if (!EOD && fi_dir->last_offset > offset) {
         fi_dir->last_offset = offset;
         fi_dir->entries.clear();
         
         this_dir = opendir(strPath.c_str());
         if(!this_dir) {
-            ret = -1;
+            ret = errno;
             self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
             FUSE_PLFS_EXIT;
-            return ret;
+            return -ret;
         }        
 
-        while ((ret = readdir_r(this_dir, &entry, &entryPtr)) == 0 && entryPtr != NULL) {
+        while ((ret = self->PIO.Readdir_r(strPath.c_str(), this_dir, &entry, &entryPtr)) == 0 && entryPtr != NULL) {
             // if ((!strcmp(entryPtr->d_name,".") ||
             //                   !strcmp(entryPtr->d_name,".."))) {
             //     continue;   // skip the dots
@@ -453,7 +468,7 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
             file = entryPtr->d_name;
             names->insert(file);            
         } 
-        closedir(this_dir);
+        ret = self->PIO.Closedir(strPath.c_str(), this_dir);
     }
     
     //////////
@@ -471,7 +486,7 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
     self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
     FUSE_PLFS_EXIT;
-    return ret;
+    return -ret;
 }
 
 int Plfs::f_releasedir( const char *path, struct fuse_file_info *fi )
@@ -494,6 +509,7 @@ int Plfs::f_releasedir( const char *path, struct fuse_file_info *fi )
 int Plfs::f_open(const char *path, struct fuse_file_info *fi)
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     fi->fh = (uint64_t)NULL;
@@ -508,19 +524,22 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi)
     // }
 
     pthread_mutex_lock( &self->fd_mutex );
-    string pathHash = string(path);
     std::map<string, OpenFile*>::iterator fd_it;
-    fd_it = self->open_files.find(pathHash);
+    fd_it = self->open_files.find(path);
     struct OpenFile *of = new OpenFile;
     if ( fd_it == self->open_files.end() ) {
         newly_created = true;
         fd = open( strPath.c_str(), fi->flags, mode );
+        if(fd < 0){
+            ret = errno;
+        }
     }else{
+        ret = 0;
         fd = fd_it->second->fd;
         of = fd_it->second;
     }
 
-    if ( fd != 0 ) {
+    if ( ret == 0 ) {
         of->fd      = fd;
         of->pid     = fuse_get_context()->pid;
         of->uid     = fuse_get_context()->uid;
@@ -529,24 +548,25 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi)
         fi->fh = (uint64_t)of;
         if ( newly_created ) {
             of->wr_ref = 1;
-            self->open_files[pathHash] = of;
+            self->open_files[path] = of;
         }else{
-            of->wr_ref++;
+            fd_it->second->wr_ref++;
         }
     }
     pthread_mutex_unlock( &self->fd_mutex );
     // we can safely add more writers to an already open file
     // bec FUSE checks f_access before allowing an f_open
-    self->BLog.log("%s, %d => path:%s, strPath:%s, fd:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), fd);
+    self->BLog.log("%s, %d => path:%s, strPath:%s, fd:%d, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), fd, ret);
     FUSE_PLFS_EXIT;
-    return fd;
+    return -ret;
 }
 
 int Plfs::f_release( const char *path, struct fuse_file_info *fi )
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
-    // string strPath = expandPath(path);
+    string strPath = expandPath(path);
     struct OpenFile *openfile = (struct OpenFile*)fi->fh; 
     int fd = 0;                                   
     if ( openfile ) {                                     
@@ -558,10 +578,11 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi )
         SET_IDS(    openfile->uid, openfile->gid );
         SET_GROUPS( openfile->uid );        
         pthread_mutex_lock( &self->fd_mutex );
+        self->BLog.log("%s %d, openfile->wr_ref:%d, openfile->flags:%d, fi->flags:%d\n", __FUNCTION__, __LINE__, openfile->wr_ref, openfile->flags, fi->flags);
         assert( openfile->flags == fi->flags );
  
         if(openfile->wr_ref == 0){
-            close(fd);
+            self->PIO.Close(strPath.c_str(), fd);
             self->open_files.erase( path );
         }
         fi->fh = (uint64_t)NULL;
@@ -572,13 +593,14 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi )
     }
     self->BLog.log("%s, %d => path:%s\n", __FUNCTION__, __LINE__, path);
     FUSE_PLFS_EXIT;
-    return 0;
+    return ret;
 }
 
 int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
                   struct fuse_file_info *fi)
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator fd_it;
@@ -590,15 +612,14 @@ int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
     }
     struct OpenFile *openfile = fd_it->second;
 
-    int ret = 0;
     ssize_t bytes_written;
 
     pthread_rwlock_wrlock( &self->write_lock );
-    bytes_written = pwrite( openfile->fd, buf, size, offset );
+    ret = self->PIO.Pwrite(strPath.c_str(), openfile->fd, buf, size, offset, &bytes_written );
     pthread_rwlock_unlock( &self->write_lock );
-    ret = (bytes_written == size) ? bytes_written : -1;
+    ret = (ret == 0) ? bytes_written : -ret;
 
-    self->BLog.log("%s, %d => path:%s, strPath:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str());
+    self->BLog.log("%s, %d => path:%s, strPath:%s, size:%d, bytes_written:%d, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), size, bytes_written, ret);
     FUSE_PLFS_EXIT;
     return ret;
 }
@@ -606,12 +627,12 @@ int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
 int Plfs::f_readlink (const char *path, char *buf, size_t bufsize)
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
-    int ret;
-    int len;
-    len = readlink(strPath.c_str(), buf, bufsize);
-    ret = (len == bufsize) ? len : -1;
+    ssize_t len;
+    ret = self->PIO.Readlink( strPath.c_str(), buf, bufsize, &len );
+    ret = (len == bufsize) ? len : -ret;
     if ( ret > 0 ) {
         ret = 0;
     }
@@ -625,40 +646,39 @@ int Plfs::f_readlink (const char *path, char *buf, size_t bufsize)
 int Plfs::f_link( const char *path, const char *to )
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
-    self->BLog.log("%s, %d => path:%s, to:%s\n", 
-            __FUNCTION__, __LINE__, path, to);    
+    string strPath = expandPath(path);
+    string strPathTo = expandPath(to);
+    ret = self->PIO.Symlink(strPath.c_str(), strPathTo.c_str());
+    self->BLog.log("%s, %d => path:%s, strPath:%s, to:%s, strPathTo:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str(), to, strPathTo.c_str());    
     FUSE_PLFS_EXIT;
-    return -1;
+    return -ret;
 }
 
 int Plfs::f_symlink( const char *path, const char *to )
 {
     FUSE_PLFS_ENTER;
-    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     int ret = 0;
-    string strPath   = expandPath(path);
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
+    string strPath = expandPath(path);
     string strPathTo = expandPath(to);
-    ret = symlink(strPath.c_str(), strPathTo.c_str());
-
-    self->BLog.log("%s, %d => path:%s, strPath:%s, to:%s, strPathTo:%s\n", 
-            __FUNCTION__, __LINE__, path, strPath.c_str(), to, strPathTo.c_str());
+    ret = self->PIO.Symlink(strPath.c_str(), strPathTo.c_str());
+    self->BLog.log("%s, %d => path:%s, strPath:%s, to:%s, strPathTo:%s\n", __FUNCTION__, __LINE__, path, strPath.c_str(), to, strPathTo.c_str());    
     FUSE_PLFS_EXIT;
-    return ret;
+    return -ret;
 }
 
 int Plfs::f_statfs(const char *path, struct statvfs *stbuf)
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
-    int ret;
-    ret = statvfs(strPath.c_str(), stbuf);
-    // ret = statvfs(BMPOINT, stbuf);
-
+    ret = self->PIO.Statvfs(strPath.c_str(), stbuf);
     self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     FUSE_PLFS_EXIT;
-    return ret;
+    return -ret;
 }
 
 // returns bytes read or -err
@@ -666,8 +686,9 @@ int Plfs::f_readn(const char *path, char *buf, size_t size, off_t offset,
                   struct fuse_file_info *fi)
 {
     FUSE_PLFS_ENTER;
+    int ret = 0;
     self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
-    int ret;
+    string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator fd_it;
     fd_it = self->open_files.find(path);
     if ( fd_it == self->open_files.end() ) {
@@ -679,12 +700,12 @@ int Plfs::f_readn(const char *path, char *buf, size_t size, off_t offset,
 
     // calls plfs_sync to flush in-memory index.
     if (of) {
-        fsync( of->fd );
+        self->PIO.Fsync(strPath.c_str(),  of->fd );
     }
     // syncIfOpen(strPath);
     ssize_t bytes_read;
-    bytes_read = pread( of->fd, buf, size, offset );
-    ret = (bytes_read == size) ? bytes_read : -1;
+    ret = self->PIO.Pread( strPath.c_str(), of->fd, buf, size, offset, &bytes_read );
+    ret = (bytes_read == size) ? bytes_read : -ret;
 
     self->BLog.log("%s, %d => path:%s\n", __FUNCTION__, __LINE__, path);
     FUSE_PLFS_EXIT;
@@ -694,8 +715,9 @@ int Plfs::f_readn(const char *path, char *buf, size_t size, off_t offset,
 int Plfs::f_flush( const char *path, struct fuse_file_info *fi )
 {
     FUSE_PLFS_ENTER;
-    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     int ret = 0;
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
+    string strPath = expandPath(path);
     std::map<string, OpenFile*>::iterator fd_it;
     fd_it = self->open_files.find(path);
     if ( fd_it == self->open_files.end() ) {
@@ -707,19 +729,19 @@ int Plfs::f_flush( const char *path, struct fuse_file_info *fi )
 
     // calls plfs_sync to flush in-memory index.
     if (of) {
-        ret = fsync( of->fd );
+        ret = self->PIO.Fsync(strPath.c_str(),  of->fd );
     }
 
-    self->BLog.log("%s, %d => path:%s\n", __FUNCTION__, __LINE__, path);
+    self->BLog.log("%s, %d => path:%s, ret:%d\n", __FUNCTION__, __LINE__, path, ret);
     FUSE_PLFS_EXIT;
-    return ret;
+    return -ret;
 }
 
 int Plfs::f_rename( const char *path, const char *to )
 {
     FUSE_PLFS_ENTER;
-    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     int ret = 0;
+    self->BLog.log("Line:%05d, Begin %s, line %d\n", __LINE__, __FUNCTION__, __LINE__);
     string strPath = expandPath(path);
     string strPathTo = expandPath(to);
     std::map<string, OpenFile*>::iterator fd_it;
@@ -729,14 +751,12 @@ int Plfs::f_rename( const char *path, const char *to )
         of = fd_it->second;  
     }
     
-       
-
     pthread_mutex_lock( &self->fd_mutex );
     if(of && of->wr_ref > 1){
         FUSE_PLFS_EXIT;
         return -1;
     }
-    ret = rename(strPath.c_str(), strPathTo.c_str());
+    ret = self->PIO.Rename(strPath.c_str(), strPathTo.c_str());
     if(ret == 0){
         self->open_files[to] = of;
         self->open_files.erase( path );
@@ -746,7 +766,7 @@ int Plfs::f_rename( const char *path, const char *to )
     self->BLog.log("%s, %d => path:%s, strPath:%s, to:%s, strPathTo:%s\n", 
             __FUNCTION__, __LINE__, path, strPath.c_str(), to, strPathTo.c_str());    
     FUSE_PLFS_EXIT;
-    return ret;
+    return -ret;
 
 }
 
@@ -762,7 +782,7 @@ mode_t Plfs::get_mod(const char* path)
     std::map<string, mode_t>::iterator itr = self->known_modes.find( path );
     if ( itr == self->known_modes.end() ) {
         struct stat stbuf;
-        ret = lstat(strPath.c_str(), &stbuf);
+        ret = self->PIO.Lstat(strPath.c_str(), &stbuf);
         if (ret == 0) {
             mode = stbuf.st_mode;
         }
