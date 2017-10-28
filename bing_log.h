@@ -76,9 +76,9 @@ public:
         sprintf(timestr,"%02d:%02d:%02d",now->tm_hour     ,now->tm_min  ,now->tm_sec );
         sprintf(mss,"%03d",tb.millitm);
         // printf("%s %s.%s %s",datestr,timestr,mss,logstr);
-        flog=fopen(LOGFN1,"a");
-        if (NULL!=flog) {
-            fprintf(flog,"%s %s.%s %s",datestr,timestr,mss,logstr);
+        // flog=fopen(LOGFN1,"a");
+        // if (NULL!=flog) {
+        //     fprintf(flog,"%s %s.%s %s",datestr,timestr,mss,logstr);
             // if (ftell(flog)>MAXLOGSIZE) {
             //     fclose(flog);
             //     if (rename(LOGFN1,LOGFN2)) {
@@ -86,9 +86,17 @@ public:
             //         rename(LOGFN1,LOGFN2);
             //     }
             // } else {
-                fclose(flog);
+                // fclose(flog);
             // }
+        // }
+        mode_t mode = (S_IRUSR|S_IWUSR|S_IXUSR|S_IXGRP|S_IXOTH);
+        int fd = open( LOGFN1, O_RDWR | O_APPEND | O_CREAT, 0777|mode );
+        char buffer[2048];
+        snprintf( buffer, 2048, "%s %s.%s %s", datestr, timestr, mss, logstr );
+        if (write( fd, buffer, strlen(buffer) ) < 0) {
+            /*ignore it*/;
         }
+        close( fd );
     }
 
     void log(const char *pszFmt, ...) {
@@ -121,8 +129,8 @@ public:
 // #endif
 //     return 0;
 // }
-//1-79ÐÐÌí¼Óµ½Äã´ømainµÄ.c»ò.cppµÄÄÇ¸öÎÄ¼þµÄ×îÇ°Ãæ
-//81-86ÐÐÌí¼Óµ½ÄãµÄmainº¯Êý¿ªÍ·
-//90-94ÐÐÌí¼Óµ½ÄãµÄmainº¯Êý½áÊøÇ°
-//ÔÚÒªÐ´LOGµÄµØ·½·ÂÕÕµÚ88ÐÐµÄÐ´·¨Ð´LOGµ½ÎÄ¼þMyLog1.logÖÐ
+//1-79ÃÃÃŒÃ­Â¼Ã“ÂµÂ½Ã„Ã£Â´Ã¸mainÂµÃ„.cÂ»Ã².cppÂµÃ„Ã„Ã‡Â¸Ã¶ÃŽÃ„Â¼Ã¾ÂµÃ„Ã—Ã®Ã‡Â°ÃƒÃ¦
+//81-86ÃÃÃŒÃ­Â¼Ã“ÂµÂ½Ã„Ã£ÂµÃ„mainÂºÂ¯ÃŠÃ½Â¿ÂªÃÂ·
+//90-94ÃÃÃŒÃ­Â¼Ã“ÂµÂ½Ã„Ã£ÂµÃ„mainÂºÂ¯ÃŠÃ½Â½Ã¡ÃŠÃ¸Ã‡Â°
+//Ã”ÃšÃ’ÂªÃÂ´LOGÂµÃ„ÂµÃ˜Â·Â½Â·Ã‚Ã•Ã•ÂµÃš88ÃÃÂµÃ„ÃÂ´Â·Â¨ÃÂ´LOGÂµÂ½ÃŽÃ„Â¼Ã¾MyLog1.logÃ–Ã
 #endif

@@ -103,6 +103,7 @@ class Plfs : public fusexx::fuse<Plfs>
         pthread_mutex_t                 fd_mutex;
         pthread_rwlock_t                write_lock;
         pthread_mutex_t                 group_mutex;
+        pthread_mutex_t                 of_wr_ref;
 
 
     ////////// for debug;
