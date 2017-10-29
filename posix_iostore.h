@@ -44,6 +44,10 @@ public:
     int Unlink(const char*);
     int Utime(const char*, const utimbuf*);
 
+    // other api for open and opendir;
+    int Open_fd(const char *bpath, int flags, mode_t mode);
+    DIR *Opendir_dir(const char *bpath);
+
 private:
 	bingLog BLog;
 };

@@ -326,3 +326,29 @@ PosixIOStore::Utime(const char* path, const struct utimbuf *times) {
     POSIX_IO_EXIT(path,rv);
     return(get_err(rv));
 }
+
+// other api for open and opendir;
+// return the file or dir describtion;
+int
+PosixIOStore::Open_fd(const char *bpath, int flags, mode_t mode) {
+    POSIX_IO_ENTER(bpath);
+    int fd;
+    fd = open(bpath, flags, mode);
+    POSIX_IO_EXIT(bpath,0);
+    return fd;
+}
+
+DIR*
+PosixIOStore::Opendir_dir(const char *bpath) {
+    POSIX_IO_ENTER(bpath);
+    DIR *dp;
+    int ret;
+    dp = opendir(bpath);
+    if (!dp) {
+        ret = errno;
+    }else{
+        ret = 0;
+    }
+    POSIX_IO_EXIT(bpath,ret);
+    return dp;
+}

@@ -47,18 +47,18 @@ using namespace std;
 //         std::vector<gid_t> orig_groups;     \
 //         do{                                 \
 //             self->BLog.log("\nFUSE_PLFS_ENTER, %s\n", __FUNCTION__);      \
-//             GET_GROUPS;                                                 \
-//             SET_GROUPS(fuse_get_context()->uid);                        \
-//             SAVE_IDS;                                                   \
-//             SET_IDS(fuse_get_context()->uid, fuse_get_context()->gid);  \
+//             GET_GROUPS;                                                   \
+//             SET_GROUPS(fuse_get_context()->uid);                          \
+//             SAVE_IDS;                                                     \
+//             SET_IDS(fuse_get_context()->uid, fuse_get_context()->gid);    \
 //         }while(0)
 
 
 // #define FUSE_PLFS_EXIT      \
 //         do{                 \
 //             self->BLog.log("FUSE_PLFS_EXIT, %s, ret: %d\n\n", __FUNCTION__, ret);  \
-//             SET_IDS(s_uid, s_gid);                                               \
-//             RESTORE_GROUPS;                                                      \
+//             SET_IDS(s_uid, s_gid);                                                 \
+//             RESTORE_GROUPS;                                                        \
 //         }while(0) 
 
 #define FUSE_PLFS_ENTER {self->BLog.log("\nFUSE_PLFS_ENTER, %s\n", __FUNCTION__);}
@@ -535,7 +535,6 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi)
     // }
 
     pthread_mutex_lock( &self->fd_mutex );
-    // pthread_mutex_lock( &self->of_wr_ref );
     std::map<string, OpenFile*>::iterator fd_it;
     fd_it = self->open_files.find(path);
     struct OpenFile *of = new OpenFile;
@@ -566,7 +565,6 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi)
         }
     }
     pthread_mutex_unlock( &self->fd_mutex );
-    // pthread_mutex_unlock( &self->of_wr_ref );
     // we can safely add more writers to an already open file
     // bec FUSE checks f_access before allowing an f_open
     self->BLog.log("%s, %d => path:%s, strPath:%s, fd:%d, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), fd, ret);
@@ -591,7 +589,6 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi )
     if ( fd ) {
         // SET_IDS(    openfile->uid, openfile->gid );
         // SET_GROUPS( openfile->uid );       
-        // pthread_mutex_lock( &self->of_wr_ref ); 
         pthread_mutex_lock( &self->fd_mutex );
         self->BLog.log("%s %d, openfile->wr_ref:%d, openfile->flags:%d, fi->flags:%d\n", __FUNCTION__, __LINE__, openfile->wr_ref, openfile->flags, fi->flags);
         assert( openfile->flags == fi->flags );
@@ -606,7 +603,6 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi )
         delete openfile;
         openfile = NULL;
         pthread_mutex_unlock( &self->fd_mutex );
-        // pthread_mutex_unlock( &self->of_wr_ref );
     }
     self->BLog.log("%s, %d => path:%s, strPath:%s, ret:%d\n", __FUNCTION__, __LINE__, path, strPath.c_str(), ret);
     FUSE_PLFS_EXIT;

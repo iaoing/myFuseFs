@@ -100,13 +100,13 @@ public:
     }
 
     void log(const char *pszFmt, ...) {
-        va_list argp;
+        // va_list argp;
 
-        Lock(&cs_log);
-        va_start(argp,pszFmt);
-        LogV(pszFmt,argp);
-        va_end(argp);
-        Unlock(&cs_log);
+        // Lock(&cs_log);
+        // va_start(argp,pszFmt);
+        // LogV(pszFmt,argp);
+        // va_end(argp);
+        // Unlock(&cs_log);
     }
     //Log}
 };
